@@ -58,7 +58,10 @@ async function main(): Promise<void> {
 
   const t0Iso = new Date().toISOString();
   const floor = withSkewBuffer(t0Iso, 60);
-  const instruction = `[spike T0.2] correlation token=${token} :: create a file notes/_spike_ref_proof.txt containing this token.`;
+  const instruction =
+    `[spike T0.2] correlation token=${token} :: Create exactly one new file at ` +
+    `notes/_spike_ref_proof.txt whose only contents are this correlation token. ` +
+    `Do not modify, delete, or create any other files.`;
   const dispatchedAt = Date.now();
   await dispatchWorkflow(ctx, caller, featureRef, { instruction });
   console.log(`[dispatch] 204 accepted against ref=${featureRef}`);

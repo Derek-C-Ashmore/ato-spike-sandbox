@@ -127,10 +127,15 @@ export async function listRunJobs(ctx: GhContext, runId: number): Promise<JobInf
   return ((await res.json()) as { jobs: JobInfo[] }).jobs;
 }
 
-/** Download a single job's logs as plaintext (the endpoint 302-redirects to a text blob). */
+/**
+ * Download a single job's logs as plaintext. The API responds 302 -> a signed blob URL; keep the
+ * default JSON Accept header (the endpoint returns 415 for `text/plain`). fetch() follows the
+ * redirect and, per the fetch spec, strips the Authorization header on the cross-origin hop to the
+ * blob (which the signed URL expects).
+ */
 export async function getJobLogs(ctx: GhContext, jobId: number): Promise<string> {
   const url = `${API}/repos/${ctx.owner}/${ctx.repo}/actions/jobs/${jobId}/logs`;
-  const res = await ghFetch(url, ctx.token, { headers: { Accept: "text/plain" } });
+  const res = await ghFetch(url, ctx.token);
   if (!res.ok) return "";
   return await res.text();
 }

@@ -1,0 +1,32 @@
+# Example caller for ruflo-hivemind.yml (Derek-Ashmore/github-workflow-examples @ ruflo).
+#
+# Prerequisites:
+#   - Repository secret ANTHROPIC_API_KEY
+#   - Branch is pushable by GITHUB_TOKEN (not blocked by protection without bypass)
+#
+# Other repos can call:
+#   uses: <owner>/github-workflow-examples/.github/workflows/ruflo-hivemind.yml@<ref>
+#   secrets:
+#     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#   with:
+#     instruction: "..."
+
+name: RuFlo Hive Mind Anthropic
+
+on:
+  workflow_dispatch:
+    inputs:
+      instruction:
+        description: Task for the RuFlo agent team
+        required: true
+        type: string
+
+jobs:
+  ruflo:
+    permissions:
+      contents: write
+    uses: Derek-Ashmore/github-workflow-examples/.github/workflows/ruflo-hivemind.yml@v1.0.2
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      instruction: ${{ inputs.instruction }}

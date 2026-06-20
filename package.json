@@ -1,0 +1,19 @@
+{
+  "name": "ato-spike-phase0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 de-risking spikes for the Agent Team Orchestrator (dispatch->run correlation, ref-based dispatch).",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "spike:correlation": "tsx scripts/spike-correlation.ts",
+    "spike:ref": "tsx scripts/spike-ref-dispatch.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,45 @@
+# Example caller for ruflo-openrouter.yml (same repository).
+#
+# Prerequisites:
+#   - Repository secret OPENROUTER_API_KEY
+#   - Branch is pushable by GITHUB_TOKEN (not blocked by protection without bypass)
+#
+# Other repos can call:
+#   uses: <owner>/github-workflow-examples/.github/workflows/ruflo-openrouter.yml@<ref>
+#   secrets:
+#     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+#   with:
+#     instruction: "..."
+#     model: "deepseek/deepseek-chat"
+
+name: RuFlo Hive Mind OpenRouter
+
+on:
+  workflow_dispatch:
+    inputs:
+      instruction:
+        description: Task for the RuFlo agent team
+        required: true
+        type: string
+      model:
+        description: OpenRouter model slug for primary (Opus/Sonnet) tiers
+        required: false
+        type: string
+        default: "deepseek/deepseek-v4-pro"
+      fast_model:
+        description: OpenRouter model slug for secondary (Haiku/subagent) tiers
+        required: false
+        type: string
+        default: "deepseek/deepseek-v4-flash"
+
+jobs:
+  ruflo:
+    permissions:
+      contents: write
+    uses: Derek-Ashmore/github-workflow-examples/.github/workflows/ruflo-openrouter.yml@v1.0.2
+    secrets:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    with:
+      instruction: ${{ inputs.instruction }}
+      model: ${{ inputs.model }}
+      fast_model: ${{ inputs.fast_model }}

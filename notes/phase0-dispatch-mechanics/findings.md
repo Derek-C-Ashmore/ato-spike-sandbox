@@ -4,130 +4,113 @@ Thread: `phase0-dispatch-mechanics` · Branch: `spike/phase0-dispatch-mechanics`
 Target scratch repo: `Derek-C-Ashmore/ato-spike-sandbox`
 Reusable worker (unchanged): `Derek-Ashmore/github-workflow-examples` `ruflo-hivemind.yml` / `ruflo-openrouter.yml` `@v1.0.2`
 
-## Status summary
+## Status summary — both mechanics demonstrated end-to-end ✅
 
-| Task | Question | Result | Confidence |
-|------|----------|--------|------------|
-| **T0.3** | Caller filenames + dispatch inputs per backend | **Confirmed** (static) | High |
-| **T0.2** | Does the *reusable* honor the dispatched ref or hard-code a branch? | **Honors the ref** (static proof; live confirmation pending) | High (static), pending (live) |
-| **T0.1** | Can we reliably recover the dispatched run id? | **Yes** — mechanism designed, logic unit-tested; live timing pending | High (logic), pending (live timing) |
+| Task | Question | Result | Evidence |
+|------|----------|--------|----------|
+| **T0.3** | Caller filenames + dispatch inputs per backend | **Confirmed** | Static (caller + reusable YAML) |
+| **T0.1** | Can we reliably recover the dispatched run id? | **Yes** | Live: run recovered in ~8.4s; token seen 14× in logs |
+| **T0.2** | Does the *reusable* honor the dispatched ref or hard-code a branch? | **Honors the ref** | Live: commit landed on the feature branch, `main` untouched + static proof |
 
-Two preconditions block the *live* end-to-end (see `questions.md`):
-1. The caller workflows must be committed to the **default branch** (`main`) so GitHub registers them as dispatchable. (The push to `main` requires owner authorization — it is the GOV-6 caller-install exception, not deliverable work.)
-2. A real `ANTHROPIC_API_KEY` repo secret is required only for the **commit-landing** half of T0.2; correlation (T0.1) and `head_branch` (T0.2) can be shown with no/dummy key.
+**Exit criteria met:** both T0.1 (dispatch→run correlation) and T0.2 (ref-based dispatch lands swarm commits on the feature branch) demonstrated live against the scratch repo; T0.3 confirmed. No result invalidates the dispatch design.
 
 ---
 
 ## T0.3 — Caller filenames & dispatch inputs per backend (Q1) — CONFIRMED
-
-Confirmed by reading the caller templates and the reusable workflows they call.
 
 | Caller file (on default branch) | Calls reusable | Dispatch inputs |
 |---|---|---|
 | `.github/workflows/ruflo-anthropic.yml` | `…/ruflo-hivemind.yml@v1.0.2` | `instruction` (required, string) |
 | `.github/workflows/ruflo-openrouter.yml` | `…/ruflo-openrouter.yml@v1.0.2` | `instruction` (required), `model` (optional, default `deepseek/deepseek-v4-pro`), `fast_model` (optional, default `deepseek/deepseek-v4-flash`) |
 
-Matches RUN-3 exactly. Notes for the template generator (Phase 3 / T3.2):
-- The **Anthropic caller's `name:`** is `RuFlo Hive Mind Anthropic`; the file is `ruflo-anthropic.yml`. The reusable it targets is named `ruflo-hivemind.yml` (file) — i.e. the caller filename and the reusable filename differ for the Anthropic backend. The template must reproduce the **caller** filename `ruflo-anthropic.yml`.
-- Both callers grant `permissions: contents: write` and map a backend secret (`ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY`).
-- The reusable workflows also accept an optional `ruflo_version` input (default `3.5.80`) that the current callers do **not** pass through. Not required by RUN-3, but worth knowing if pinning RuFlo becomes desirable (see design-impact flags).
+Matches RUN-3 exactly. Both are registered and `active` (verified via `GET /actions/workflows`, ids 299339070 / 299339071). Notes for the template generator (Phase 3 / T3.2):
+- Caller filename ≠ reusable filename for Anthropic: caller `ruflo-anthropic.yml` → reusable `ruflo-hivemind.yml`. The template generator must key off the **caller** name.
+- Both grant `permissions: contents: write` and map a backend secret (`ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY`).
+- The reusable also accepts an optional `ruflo_version` (default `3.5.80`) the callers don't pass through (see flag #4).
 
 ---
 
-## T0.2 — Ref-based dispatch (B2 / RUN-4 / Q6) — REUSABLE HONORS THE REF
+## T0.1 — Dispatch → run correlation (B1 / EXEC-1 / Q5) — PROVEN LIVE
 
-**Static proof from `ruflo-hivemind.yml@v1.0.2` (the unchanged reusable):**
+`workflow_dispatch` returns **HTTP 204 with no body** — the dispatcher never learns the run id. Recovery
+(design §9), implemented in `scripts/spike-correlation.ts` over the pure matcher `src/correlation.ts`:
+poll `GET /actions/runs?event=workflow_dispatch&branch=<ref>&created>=<t0−60s>` and keep runs where
+`event==workflow_dispatch` ∧ `head_branch==<ref>` ∧ workflow path tail `==<caller>` ∧ `actor.login==<dispatcher>`,
+newest first. **15 unit tests** cover every filter, sort order, skew buffer, token gen (`npm test`).
 
-```yaml
-- name: Checkout repository
-  uses: actions/checkout@v4
-  with:
-    fetch-depth: 0          # <-- NO `ref:` specified
-```
-With no `ref:`, `actions/checkout@v4` checks out the **ref that triggered the workflow**. For a
-`workflow_dispatch` dispatched with `ref=<feature-branch>`, `github.ref` is `refs/heads/<feature-branch>`,
-so the worker operates on the feature branch.
+**Live run (T0.1):** [run 27872248081](https://github.com/Derek-C-Ashmore/ato-spike-sandbox/actions/runs/27872248081)
+- Dispatched `ruflo-anthropic.yml` against `spike/phase0-dispatch-mechanics` with token `ato-corr-1781961222326-7f70f5b5`.
+- Run **recovered ~8.4s after dispatch** (2 poll cycles at 2s), `head_branch=spike/phase0-dispatch-mechanics`.
+- **Token round-trip confirmed:** the token appears **14×** in the job logs — in the rendered
+  `instruction:` input and the `RUFLO_INSTRUCTION` env. (Run concluded `success`; the no-op instruction
+  produced no committable change, so the branch tip was unchanged — a clean "no-op ⇒ no commit" data point.)
 
-```yaml
-- name: Commit and push changes
-  run: |
-    ...
-    git commit -m "ruflo: ${SUMMARY}"
-    git push origin HEAD     # <-- pushes the checked-out branch, no hard-coded branch name
-```
-`HEAD` is the checked-out feature branch, so the swarm's commit is pushed **back to the dispatched ref**.
+**Smallest reliable time window (measured + recommended):**
+- Observed first appearance: **~8.4s** after dispatch.
+- `created>=` floor: **t0 − 60s** (clock-skew buffer between dispatcher and GitHub); poll **2s**.
+- The decisive safety factor is **per-repo serialization (design §11.1)** — with at most one in-flight
+  dispatch per repo there is nothing to confuse the new run with, so the window need not be tight.
 
-**Conclusion:** the reusable workflow **honors the dispatched ref and does NOT hard-code a branch.**
-The design's dependency on ref-based dispatch (design §9, RUN-4) is satisfied by the current reusable.
-The same checkout/push pattern is present in `ruflo-openrouter.yml@v1.0.2`.
-
-**Live confirmation (pending preconditions):** `scripts/spike-ref-dispatch.ts` dispatches the caller with
-`ref=spike/phase0-dispatch-mechanics`, asserts `run.head_branch == spike/phase0-dispatch-mechanics`
-(provable with no key), and — with a real key — watches the feature-branch tip advance via a
-`github-actions[bot]` `ruflo:` commit while `main` stays unchanged.
-
-> Note on the GitHub registration limitation (Q6): confirmed still in force. A workflow must exist on the
-> **default** branch to be dispatchable; once registered there it can be dispatched against any ref and the
-> run picks up that branch's content. The design relies on exactly this and it holds.
+**API limitation (design-impacting, mild):** the REST runs **list** does not expose `workflow_dispatch`
+inputs, so the token can't be a *list-level* discriminator. It is confirmed from **job logs**
+(`GET /actions/jobs/{id}/logs` → 302 → signed blob; note: this endpoint rejects `Accept: text/plain` with
+415 — use the JSON Accept and let the client follow the redirect). The list-level key is
+`branch+event+created+caller+actor`; the token is the secondary, log-level confirmation.
 
 ---
 
-## T0.1 — Dispatch → run correlation (B1 / EXEC-1 / Q5) — MECHANISM PROVEN, LIVE TIMING PENDING
+## T0.2 — Ref-based dispatch (B2 / RUN-4 / Q6) — PROVEN LIVE + STATIC
 
-`workflow_dispatch` returns **HTTP 204 with no body** — the dispatcher never learns the run id directly.
-This is the entire B1 risk. Recovery approach (design §9), implemented in `scripts/spike-correlation.ts`
-with the pure, unit-tested matcher in `src/correlation.ts`:
+**Static proof from the unchanged `ruflo-hivemind.yml@v1.0.2`:**
+- `actions/checkout@v4` with **no `ref:`** → checks out the *triggering* ref (`refs/heads/<feature-branch>` for a dispatch against that ref).
+- Commit step ends `git push origin HEAD` → pushes the checked-out branch; **no hard-coded branch name**.
 
-Poll `GET /actions/runs?event=workflow_dispatch&branch=<ref>&created>=<t0−skew>` and keep only runs where:
-- `event == workflow_dispatch`
-- `head_branch == <dispatched ref>`
-- workflow path tail `== <caller file>` (e.g. `ruflo-anthropic.yml`)
-- `actor.login == <dispatching identity>`
-- `created_at >= t0 − 60s` (clock-skew buffer)
+**Live run (T0.2):** [run 27872372285](https://github.com/Derek-C-Ashmore/ato-spike-sandbox/actions/runs/27872372285)
+- Dispatched `ruflo-anthropic.yml` against `ref=spike/phase0-dispatch-mechanics`; `run.head_branch == spike/phase0-dispatch-mechanics`.
+- Swarm commit **`2f84a85`** by `github-actions[bot]`, message `ruflo: [spike T0.2] correlation token=ato-corr-1781961547575-22f95095 :: Create…`.
+- Feature branch advanced `107aaf9 → 2f84a85`; **`main` unchanged (`2ae5f25`)**.
+- The commit added **only** `notes/_spike_ref_proof.txt` (content = the token); `main` has no such file (HTTP 404).
 
-then take the newest. **15 unit tests** cover each filter, the sort order, the skew buffer, and token
-generation (`npm test`).
+**Conclusion:** the reusable **honors the dispatched ref and does NOT hard-code a branch** — the swarm's
+commit lands on the dispatched feature branch, never on `main`. The design's RUN-4 dependency holds. Two
+bonus confirmations from this run: (a) the token also round-trips into the **commit message**, and (b) the
+reusable's exclusion logic (skip `.mcp.json`, `CLAUDE.md`, root dot-dirs except `.github/`) works — only the
+one intended file was committed despite `ruflo init` scaffolding dot-directories.
 
-**Important API limitation (design-impacting, mild):** the REST API does **not** expose a
-`workflow_dispatch` run's **inputs**. So the correlation token embedded in `instruction` cannot be matched
-from the runs *list*; it is confirmed instead from the **job logs** (`GET /actions/jobs/{id}/logs`, plaintext),
-where the reusable echoes the instruction when it runs the swarm. The list-level correlation therefore relies
-on `branch + event + created + caller + actor`; the token is the **secondary confirmation** and, combined with
-**per-repo serialization (design §11.1 — at most one in-flight dispatch per repo)**, the match is unambiguous.
-
-**Smallest reliable time window (engineering recommendation; empirical number pending live run):**
-- `created>=` floor: **t0 − 60s** (absorbs clock skew between dispatcher and GitHub).
-- Poll interval: **2s**; runs typically register within a few seconds of dispatch.
-- The decisive safety factor is **per-repo serialization**, not a tight window: with one in-flight dispatch
-  per repo there is nothing to confuse the new run with, so the window can be generous without ambiguity.
-- The token-in-logs check (when a real key lets the run echo the instruction) upgrades the match from
-  "almost certainly" to "proven" for the rare concurrent-dispatch case.
+> GitHub registration limitation (Q6) confirmed still in force: a workflow must exist on the **default**
+> branch to be dispatchable; once registered there it can be dispatched against any ref. The caller-install
+> on `main` is required for exactly this reason (owner-authorized; GOV-6 caller-install exception).
 
 ---
 
 ## Flags that could reshape the dispatch design
 
-1. **Dispatch inputs are not in the runs API.** The token cannot be a *list-level* discriminator — it only
-   confirms via logs (which requires the run to progress past the secret-validation gate). The robust
-   primary key is `branch+event+created+caller+actor` **plus per-repo serialization**. Keep serialization
-   (T3.2a) as a hard invariant, not just an optimization — correlation robustness depends on it.
-2. **Token only reaches logs if the run gets far enough.** The reusable's first step fails fast when
-   `ANTHROPIC_API_KEY` is empty, *before* the instruction is echoed. A run that dies at validation is still
-   correlatable by id but yields no token-in-logs. Monitoring (T4.2) must treat "no token in logs" as
-   inconclusive-not-mismatch and fall back to the id-level match.
-3. **Caller vs. reusable filename mismatch (Anthropic).** Caller `ruflo-anthropic.yml` → reusable
-   `ruflo-hivemind.yml`. The template generator keys off the *caller* filename; don't assume they match.
-4. **`ruflo_version` is not surfaced by the callers** (defaults to `3.5.80` inside the reusable). If ATO ever
-   needs to pin/upgrade RuFlo per-dispatch, the caller template would need a new pass-through input.
-5. **No design-invalidating result found.** Both mechanics behave as the design assumes (ref honored;
-   correlation feasible). Nothing here forces a redesign.
+1. **Dispatch inputs are not in the runs API.** The token confirms only via *logs*, not the runs list. Keep
+   the primary key as `branch+event+created+caller+actor` **plus per-repo serialization** (T3.2a) — treat
+   serialization as a hard correlation invariant, not just a throughput optimization.
+2. **Token only reaches logs if the run gets past the secret-validation gate.** A run with an empty
+   `ANTHROPIC_API_KEY` fails before echoing the instruction; it is still correlatable by id but yields no
+   token-in-logs. Run Monitor (T4.2) must treat "no token in logs" as **inconclusive, not mismatch**, and
+   fall back to the id-level match. (Here an org-level key was present, so runs executed fully.)
+3. **Caller vs reusable filename mismatch (Anthropic)** — `ruflo-anthropic.yml` → `ruflo-hivemind.yml`.
+4. **`ruflo_version` is not surfaced by the callers** (defaults to `3.5.80`). If ATO needs to pin/upgrade
+   RuFlo per dispatch, the caller template needs a new pass-through input. (See Q-B1.)
+5. **Owner/account split** `Derek-C-Ashmore` (scratch) vs `Derek-Ashmore` (reusable + planning). The
+   cross-account reusable reference resolved fine (public repo). Confirm this is intentional for the real
+   GitHub App install scope. (See Q-B2.)
+6. **No design-invalidating result.** Both mechanics behave as the design assumes.
 
 ---
 
-## Reproes / artifacts
+## Reproduce
 
-- `src/correlation.ts` — pure matcher + token generator (unit-tested).
-- `src/github.ts` — minimal REST client (dispatch, list runs, get run, job logs, branch SHA).
-- `scripts/spike-correlation.ts` — live T0.1 (`npm run spike:correlation`).
-- `scripts/spike-ref-dispatch.ts` — live T0.2 (`npm run spike:ref`).
-- `tests/correlation.test.ts` — 15 passing tests. `npm run build && npm test` both green.
+```bash
+npm install
+npm run build && npm test                      # 15 tests green
+GH_TOKEN=*** REF=<branch> npm run spike:correlation     # T0.1
+GH_TOKEN=*** FEATURE_REF=<branch> npm run spike:ref     # T0.2 (needs a working ANTHROPIC_API_KEY)
+```
+
+Artifacts: `src/correlation.ts` (matcher+token), `src/github.ts` (REST client), `scripts/spike-correlation.ts`,
+`scripts/spike-ref-dispatch.ts`, `tests/correlation.test.ts`, and the bot-committed `notes/_spike_ref_proof.txt`
+(left in place as the T0.2 evidence).
